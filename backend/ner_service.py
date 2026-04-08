@@ -21,19 +21,47 @@ def _get_pipeline(model_key: str):
         model_id = model_cfg["id"]
         logger.info(f"Loading model: {model_id} ...")
 
+        # Map the custom model ID to its base tokenizer to bypass corrupted tokenizer files on the hub
+        tokenizer_id = model_id
+        if "distilbert" in model_id.lower():
+            tokenizer_id = "distilbert-base-uncased"
+        elif "roberta" in model_id.lower():
+            tokenizer_id = "roberta-base"
+        elif "bert" in model_id.lower():
+            tokenizer_id = "bert-base-uncased"
+
         try:
-            tokenizer = AutoTokenizer.from_pretrained(model_id)
-            model = AutoModelForTokenClassification.from_pretrained(model_id)
-            device = 0 if torch.cuda.is_available() else -1
-            ner_pipe = pipeline(
-                "ner",
-                model=model,
-                tokenizer=tokenizer,
-                aggregation_strategy="simple",
-                device=device,
-            )
+            logger.info(f"Loading tokenizer: {tokenizer_id} ...")
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_id)
+            
+            if torch.cuda.is_available():
+                logger.info(f"Loading {model_id} onto GPU...")
+                model = AutoModelForTokenClassification.from_pretrained(
+                    model_id,
+                    device_map="auto",
+                    torch_dtype=torch.float16
+                )
+                ner_pipe = pipeline(
+                    "ner",
+                    model=model,
+                    tokenizer=tokenizer,
+                    aggregation_strategy="simple"
+                )
+                device_name = "GPU"
+            else:
+                logger.info(f"Loading {model_id} onto CPU...")
+                model = AutoModelForTokenClassification.from_pretrained(model_id)
+                ner_pipe = pipeline(
+                    "ner",
+                    model=model,
+                    tokenizer=tokenizer,
+                    aggregation_strategy="simple",
+                    device=-1
+                )
+                device_name = "CPU"
+                
             _pipelines[model_key] = ner_pipe
-            logger.info(f"Model {model_id} loaded successfully on {'GPU' if device == 0 else 'CPU'}.")
+            logger.info(f"Model {model_id} loaded successfully on {device_name}.")
         except Exception as e:
             logger.error(f"Failed to load model {model_id}: {e}")
             raise
